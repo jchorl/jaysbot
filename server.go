@@ -105,76 +105,80 @@ func mlb_handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// find the jays game
-	jaysGame := Game{}
+	var jaysGame *Game
 	areJaysHome := false
 	games := parsed.Data.Games.Game
 	for index, game := range games {
 		if game.HomeTeamCity == "Toronto" {
-			jaysGame = games[index]
+			jaysGame = &games[index]
 			areJaysHome = true
+			break
 		} else if game.AwayTeamCity == "Toronto" {
-			jaysGame = games[index]
+			jaysGame = &games[index]
 			areJaysHome = false
+			break
 		}
 	}
 
-	// pull the last alert out of the db
-	q := datastore.NewQuery("jays").Order("-Updated")
-	var alerts []Alert
-	keys, err := q.GetAll(c, &alerts)
-	if err != nil {
-		c.Criticalf("%s", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	notify := false
-	jaysGame.Alerts.Updated = time.Now()
-	if len(alerts) == 0 {
-		// put the new alert into the db
-		_, err := datastore.Put(c, datastore.NewIncompleteKey(c, "jays", nil), &jaysGame.Alerts)
+	if jaysGame != nil {
+		// pull the last alert out of the db
+		q := datastore.NewQuery("jays").Order("-Updated")
+		var alerts []Alert
+		keys, err := q.GetAll(c, &alerts)
 		if err != nil {
 			c.Criticalf("%s", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		notify = true
-	} else {
-		// take the latest entity
-		latest := alerts[0]
 
-		// check if it is different
-		if latest.BriefText != jaysGame.Alerts.BriefText {
-			_, err = datastore.Put(c, keys[0], &jaysGame.Alerts)
+		notify := false
+		jaysGame.Alerts.Updated = time.Now()
+		if len(alerts) == 0 {
+			// put the new alert into the db
+			_, err := datastore.Put(c, datastore.NewIncompleteKey(c, "jays", nil), &jaysGame.Alerts)
 			if err != nil {
 				c.Criticalf("%s", err)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 			notify = true
-		}
-	}
-
-	if notify {
-		color := "gray"
-		if areJaysHome {
-			if jaysGame.Linescore.Runs.Home > jaysGame.Linescore.Runs.Away {
-				color = "green"
-			} else if jaysGame.Linescore.Runs.Away > jaysGame.Linescore.Runs.Home {
-				color = "red"
-			}
 		} else {
-			if jaysGame.Linescore.Runs.Home > jaysGame.Linescore.Runs.Away {
-				color = "red"
-			} else if jaysGame.Linescore.Runs.Away > jaysGame.Linescore.Runs.Home {
-				color = "green"
+			// take the latest entity
+			latest := alerts[0]
+
+			// check if it is different
+			if latest.BriefText != jaysGame.Alerts.BriefText {
+				_, err = datastore.Put(c, keys[0], &jaysGame.Alerts)
+				if err != nil {
+					c.Criticalf("%s", err)
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				notify = true
 			}
 		}
-		_, err = send_to_hipchat(jaysGame.Alerts.BriefText, color, c)
-		if err != nil {
-			c.Criticalf("%s", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+
+		if notify {
+			color := "gray"
+			if areJaysHome {
+				if jaysGame.Linescore.Runs.Home > jaysGame.Linescore.Runs.Away {
+					color = "green"
+				} else if jaysGame.Linescore.Runs.Away > jaysGame.Linescore.Runs.Home {
+					color = "red"
+				}
+			} else {
+				if jaysGame.Linescore.Runs.Home > jaysGame.Linescore.Runs.Away {
+					color = "red"
+				} else if jaysGame.Linescore.Runs.Away > jaysGame.Linescore.Runs.Home {
+					color = "green"
+				}
+			}
+			_, err = send_to_hipchat(jaysGame.Alerts.BriefText, color, c)
+			if err != nil {
+				c.Criticalf("%s", err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 		}
 	}
 }
