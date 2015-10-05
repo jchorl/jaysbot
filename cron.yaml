@@ -1,0 +1,5 @@
+cron:
+- description: Jays Update Job
+  url: /poll_mlb
+  schedule: every 5 mins from 13:00 to 1:00
+  timezone: America/New_York
