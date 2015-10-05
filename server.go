@@ -14,8 +14,8 @@ import (
 
 type Linescore struct {
 	Runs struct {
-		Home string `json:"home"`
-		Away string `json:"away"`
+		Home int `json:"home,string"`
+		Away int `json:"away,string"`
 	} `json:"r"`
 }
 
