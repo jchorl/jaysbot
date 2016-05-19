@@ -172,7 +172,10 @@ func mlb_handler(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			notify = true
+
+			if jaysGame.Alerts.BriefText != "" {
+				notify = true
+			}
 		} else {
 			// take the latest entity
 			latest := alerts[0]
@@ -185,7 +188,9 @@ func mlb_handler(w http.ResponseWriter, r *http.Request) {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
 				}
-				notify = true
+				if jaysGame.Alerts.BriefText != "" {
+					notify = true
+				}
 			}
 		}
 
