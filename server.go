@@ -1,12 +1,14 @@
 package server
 
 import (
-	"appengine"
-	"appengine/datastore"
-	"appengine/urlfetch"
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"golang.org/x/net/context"
+	"google.golang.org/appengine"
+	"google.golang.org/appengine/datastore"
+	"google.golang.org/appengine/log"
+	"google.golang.org/appengine/urlfetch"
 	"net/http"
 	"strconv"
 	"time"
@@ -47,11 +49,21 @@ type HipChatNotification struct {
 	MessageFormat string `json:"message_format"`
 }
 
+type SlackNotification struct {
+	Attachments []SlackAttachment `json:"attachments"`
+}
+
+type SlackAttachment struct {
+	Fallback string `json:"fallback"`
+	Color    string `json:"color"`
+	Text     string `json:"text"`
+}
+
 func init() {
 	http.HandleFunc("/poll_mlb", mlb_handler)
 }
 
-func send_to_hipchat(message string, color string, context appengine.Context) (*http.Response, error) {
+func send_to_hipchat(message string, color string, context context.Context) (*http.Response, error) {
 	req := HipChatNotification{
 		Color:         color,
 		Message:       message,
@@ -67,12 +79,31 @@ func send_to_hipchat(message string, color string, context appengine.Context) (*
 	return client.Post(url, "application/json", bytes.NewBuffer(encoded))
 }
 
+func send_to_slack(message string, color string, context context.Context) (*http.Response, error) {
+	req := SlackNotification{
+		Attachments: []SlackAttachment{
+			SlackAttachment{
+				Color: color,
+				Text:  message,
+			},
+		},
+	}
+	client := urlfetch.Client(context)
+	encoded, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	url := fmt.Sprintf("https://hooks.slack.com/services/%s/%s/%s", TVAL, BVAL, KVAL)
+	log.Infof(context, "POST %s to %s", encoded, url)
+	return client.Post(url, "application/json", bytes.NewBuffer(encoded))
+}
+
 func mlb_handler(w http.ResponseWriter, r *http.Request) {
 	c := appengine.NewContext(r)
 	// prepare the request
 	timezone, err := time.LoadLocation("America/New_York")
 	if err != nil {
-		c.Criticalf("%s", err)
+		log.Criticalf(c, "%s", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -90,7 +121,7 @@ func mlb_handler(w http.ResponseWriter, r *http.Request) {
 	client := urlfetch.Client(c)
 	response, err := client.Get(fmt.Sprint("http://gd2.mlb.com/components/game/mlb/year_", year, "/month_", monthString, "/day_", dayString, "/master_scoreboard.json"))
 	if err != nil {
-		c.Criticalf("%s", err)
+		log.Criticalf(c, "%s", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -99,7 +130,7 @@ func mlb_handler(w http.ResponseWriter, r *http.Request) {
 	var parsed MLBResponse
 	err = json.NewDecoder(response.Body).Decode(&parsed)
 	if err != nil {
-		c.Criticalf("%s", err)
+		log.Criticalf(c, "%s", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -126,7 +157,7 @@ func mlb_handler(w http.ResponseWriter, r *http.Request) {
 		var alerts []Alert
 		keys, err := q.GetAll(c, &alerts)
 		if err != nil {
-			c.Criticalf("%s", err)
+			log.Criticalf(c, "%s", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -137,7 +168,7 @@ func mlb_handler(w http.ResponseWriter, r *http.Request) {
 			// put the new alert into the db
 			_, err := datastore.Put(c, datastore.NewIncompleteKey(c, "jays", nil), &jaysGame.Alerts)
 			if err != nil {
-				c.Criticalf("%s", err)
+				log.Criticalf(c, "%s", err)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -150,7 +181,7 @@ func mlb_handler(w http.ResponseWriter, r *http.Request) {
 			if latest.BriefText != jaysGame.Alerts.BriefText {
 				_, err = datastore.Put(c, keys[0], &jaysGame.Alerts)
 				if err != nil {
-					c.Criticalf("%s", err)
+					log.Criticalf(c, "%s", err)
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
 				}
@@ -159,23 +190,23 @@ func mlb_handler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if notify {
-			color := "gray"
+			color := "#808080"
 			if areJaysHome {
 				if jaysGame.Linescore.Runs.Home > jaysGame.Linescore.Runs.Away {
-					color = "green"
+					color = "#00cc00"
 				} else if jaysGame.Linescore.Runs.Away > jaysGame.Linescore.Runs.Home {
-					color = "red"
+					color = "#e50000"
 				}
 			} else {
 				if jaysGame.Linescore.Runs.Home > jaysGame.Linescore.Runs.Away {
-					color = "red"
+					color = "#e50000"
 				} else if jaysGame.Linescore.Runs.Away > jaysGame.Linescore.Runs.Home {
-					color = "green"
+					color = "#00cc00"
 				}
 			}
-			_, err = send_to_hipchat(jaysGame.Alerts.BriefText, color, c)
+			_, err = send_to_slack(jaysGame.Alerts.BriefText, color, c)
 			if err != nil {
-				c.Criticalf("%s", err)
+				log.Criticalf(c, "%s", err)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
